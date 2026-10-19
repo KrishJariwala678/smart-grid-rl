@@ -1,8 +1,8 @@
 # Third-party reference papers — copyrighted, not ours to redistribute
-PBL_Deliverables/References/
+deliverables/References/
 
 # Working copies
-PBL_Deliverables/Copy_*/
+deliverables/Copy_*/
 
 # Vercel project link + build cache
 .vercel/

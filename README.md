@@ -13,9 +13,9 @@ every node as close to zero as possible by routing power between them.
 | Path | |
 |---|---|
 | `power-grid-rl/` | Browser simulator — runs the grid live, hour by hour. This is what's deployed. |
-| `PBL.ipynb` | Full training notebook: data generation, EDA, forecaster, both control paradigms, evaluation |
-| `pbl_artifacts/` | Trained forecaster and the figures produced by the run |
-| `PBL_Deliverables/` | Report, presentation and architecture diagrams |
+| `smart_grid_rl.ipynb` | Full training notebook: data generation, EDA, forecaster, both control paradigms, evaluation |
+| `artifacts/` | Trained forecaster and the figures produced by the run |
+| `deliverables/` | Report, presentation and architecture diagrams |
 
 ## Approach
 
@@ -79,7 +79,7 @@ a genuine negative result rather than tuned away.
 ## Reproducing
 
     pip install tensorflow pandas numpy scipy scikit-learn matplotlib pettingzoo gymnasium
-    jupyter notebook PBL.ipynb
+    jupyter notebook smart_grid_rl.ipynb
 
 Seeded throughout (`SEED = 42`). Budgets are overridable by environment variable —
 `PBL_MARL_EPISODES=20` and friends — for a quick smoke test.
