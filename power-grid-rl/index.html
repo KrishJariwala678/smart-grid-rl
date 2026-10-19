@@ -1,0 +1,1537 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Live hour-by-hour simulation of a three-node smart grid balanced by deep reinforcement learning controllers.">
+<meta name="color-scheme" content="light dark">
+<style>
+  :root { color-scheme: light; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  body { margin: 0; font: 14px system-ui, -apple-system, "Segoe UI", sans-serif; }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<title>Three-Node Grid Balancer</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: sticky instrument bar over a two-column control-room floor (schematic + telemetry),
+   collapsing to one column on phones; findings read as a report below the live floor. */
+:root {
+  --bg:            #f4f6f8;
+  --surface:       #ffffff;
+  --surface-2:     #eef1f5;
+  --surface-3:     #e4e9ef;
+  --ink:           #0d1117;
+  --ink-2:         #4a5361;
+  --muted:         #7b8494;
+  --grid:          #e0e5ec;
+  --rule:          #c9d0da;
+  --ring:          rgba(13,17,23,0.10);
+  --a:             #2a78d6;
+  --b:             #eb6834;
+  --c:             #1baf7a;
+  --good:          #0ca30c;
+  --warning:       #fab219;
+  --critical:      #d03b3b;
+  --good-ink:      #006300;
+  --shadow:        0 1px 2px rgba(13,17,23,0.06), 0 8px 24px -16px rgba(13,17,23,0.18);
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg:        #0c0f13;
+    --surface:   #14181e;
+    --surface-2: #1b2129;
+    --surface-3: #232a33;
+    --ink:       #e8ecf2;
+    --ink-2:     #a8b2c0;
+    --muted:     #7b8494;
+    --grid:      #222932;
+    --rule:      #2e3640;
+    --ring:      rgba(255,255,255,0.10);
+    --a:         #3987e5;
+    --b:         #d95926;
+    --c:         #199e70;
+    --good-ink:  #0ca30c;
+    --shadow:    0 1px 2px rgba(0,0,0,0.5), 0 8px 24px -16px rgba(0,0,0,0.8);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg:        #0c0f13;
+  --surface:   #14181e;
+  --surface-2: #1b2129;
+  --surface-3: #232a33;
+  --ink:       #e8ecf2;
+  --ink-2:     #a8b2c0;
+  --muted:     #7b8494;
+  --grid:      #222932;
+  --rule:      #2e3640;
+  --ring:      rgba(255,255,255,0.10);
+  --a:         #3987e5;
+  --b:         #d95926;
+  --c:         #199e70;
+  --good-ink:  #0ca30c;
+  --shadow:    0 1px 2px rgba(0,0,0,0.5), 0 8px 24px -16px rgba(0,0,0,0.8);
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 1240px; margin: 0 auto; padding-inline: 18px; padding-block: 0 56px; }
+
+h1, h2, h3 { text-wrap: balance; margin: 0; font-weight: 600; letter-spacing: -0.015em; }
+h1 { font-size: clamp(26px, 4.4vw, 40px); line-height: 1.1; }
+h2 { font-size: clamp(19px, 2.6vw, 24px); }
+h3 { font-size: 15px; }
+p { margin: 0; }
+.eyebrow {
+  font-family: var(--mono); font-size: 11px; font-weight: 500;
+  letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted);
+}
+.lede { color: var(--ink-2); max-width: 66ch; font-size: 15.5px; }
+.num { font-variant-numeric: tabular-nums; font-family: var(--mono); }
+
+/* ---------- header ---------- */
+header.page { padding-block: 40px 22px; display: flex; flex-direction: column; gap: 12px; }
+
+/* ---------- instrument bar ---------- */
+.bar {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 30;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--rule); border-radius: 12px;
+  padding: 10px 12px; margin-bottom: 14px;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;
+  box-shadow: var(--shadow);
+}
+.bar-group { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.bar-group + .bar-group { border-left: 1px solid var(--rule); padding-left: 14px; }
+@media (max-width: 760px) { .bar-group + .bar-group { border-left: 0; padding-left: 0; } }
+label.fld { font-size: 11px; font-family: var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+
+button {
+  font-family: var(--sans); font-size: 13px; font-weight: 500;
+  background: var(--surface-2); color: var(--ink);
+  border: 1px solid var(--rule); border-radius: 8px;
+  padding: 7px 13px; cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+button:hover { background: var(--surface-3); }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--a); outline-offset: 2px; }
+button.primary { background: var(--a); border-color: var(--a); color: #fff; min-width: 92px; }
+button.primary:hover { filter: brightness(1.08); }
+button[aria-pressed="true"] { background: var(--surface-3); border-color: var(--ink-2); }
+select, input[type="number"] {
+  font-family: var(--mono); font-size: 13px;
+  background: var(--surface-2); color: var(--ink);
+  border: 1px solid var(--rule); border-radius: 8px; padding: 6px 8px;
+}
+input[type="range"] { accent-color: var(--a); width: 104px; }
+
+/* ---------- clock strip ---------- */
+.clock {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px;
+  padding: 11px 14px; margin-bottom: 14px;
+  border: 1px solid var(--rule); border-radius: 12px; background: var(--surface);
+}
+.clock .big { font-family: var(--mono); font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--mono); font-size: 11.5px; font-weight: 500;
+  padding: 3px 9px; border-radius: 999px;
+  border: 1px solid var(--rule); background: var(--surface-2); color: var(--ink-2);
+}
+.chip .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
+.chip.normal   { color: var(--good-ink); border-color: color-mix(in srgb, var(--good) 40%, var(--rule)); }
+.chip.heatwave { color: var(--critical); border-color: color-mix(in srgb, var(--critical) 40%, var(--rule)); }
+.chip.storm    { color: var(--a); border-color: color-mix(in srgb, var(--a) 40%, var(--rule)); }
+
+/* ---------- stat tiles ---------- */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(146px, 1fr)); gap: 10px; margin-bottom: 18px; }
+.tile { border: 1px solid var(--rule); border-radius: 12px; background: var(--surface); padding: 12px 14px; min-width: 0; }
+.tile .k { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.tile .v { font-family: var(--mono); font-size: 25px; font-weight: 600; letter-spacing: -0.03em; line-height: 1.2; margin-top: 3px; }
+.tile .u { font-size: 12px; font-weight: 500; color: var(--muted); }
+.tile.hero { background: var(--surface-2); border-color: var(--ink-2); }
+.tile.hero .v { font-size: 34px; }
+
+/* ---------- floor layout ---------- */
+.floor { display: grid; grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr); gap: 14px; align-items: start; }
+@media (max-width: 1000px) { .floor { grid-template-columns: minmax(0, 1fr); } }
+.card {
+  border: 1px solid var(--rule); border-radius: 12px; background: var(--surface);
+  padding: 14px; min-width: 0;
+}
+.card > header { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.card > header .note { font-size: 11.5px; color: var(--muted); font-family: var(--mono); }
+.stack { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+/* ---------- schematic ---------- */
+.schematic { width: 100%; max-width: 100%; height: auto; display: block; }
+.schematic text { font-family: var(--mono); }
+
+/* ---------- node readouts ---------- */
+.nodes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 460px) { .nodes { grid-template-columns: minmax(0, 1fr); } }
+.node {
+  border: 1px solid var(--rule); border-radius: 10px; background: var(--surface-2);
+  padding: 9px 10px; min-width: 0; border-top: 3px solid var(--nc);
+}
+.node .nm { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px; }
+.node .nm b { font-family: var(--mono); color: var(--nc); }
+.node .sub { font-size: 10.5px; color: var(--muted); font-family: var(--mono); letter-spacing: 0.04em; text-transform: uppercase; }
+.node dl { margin: 7px 0 0; display: grid; grid-template-columns: auto 1fr; gap: 1px 8px; font-size: 12px; }
+.node dt { color: var(--muted); font-family: var(--mono); font-size: 11px; }
+.node dd { margin: 0; text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.imbbar { position: relative; height: 7px; border-radius: 4px; background: var(--surface-3); margin-top: 8px; overflow: hidden; }
+.imbbar i { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--rule); left: 50%; }
+.imbbar span { position: absolute; top: 0; bottom: 0; border-radius: 3px; background: var(--nc); transition: left 180ms ease, width 180ms ease; }
+
+/* ---------- canvas chart ---------- */
+.chartbox { position: relative; width: 100%; }
+.chartbox canvas { width: 100%; display: block; border-radius: 8px; }
+.tip {
+  position: absolute; pointer-events: none; z-index: 5;
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 8px;
+  padding: 7px 9px; font-family: var(--mono); font-size: 11.5px; line-height: 1.5;
+  box-shadow: var(--shadow); white-space: nowrap; transform: translate(-50%, -100%);
+  transition: opacity 90ms ease;
+}
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 9px; font-size: 11.5px; font-family: var(--mono); color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.swatch { width: 14px; height: 3px; border-radius: 2px; flex: none; }
+.swatch.dash { height: 0; border-top: 2px dashed currentColor; border-radius: 0; }
+
+/* ---------- decision table ---------- */
+.tblwrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 12px; }
+th, td { text-align: right; padding: 5px 7px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+th { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+td:first-child, th:first-child { text-align: left; }
+td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+tbody tr.sel { background: color-mix(in srgb, var(--a) 12%, transparent); }
+tbody tr.sel td { font-weight: 600; }
+tbody tr.best td:first-child::after { content: " ★"; color: var(--warning); }
+.badge {
+  font-family: var(--mono); font-size: 10px; font-weight: 600; letter-spacing: 0.06em;
+  padding: 1px 6px; border-radius: 4px; border: 1px solid currentColor; margin-left: 6px;
+}
+.badge.pick { color: var(--a); }
+.badge.hold { color: var(--muted); }
+
+/* ---------- action histogram ---------- */
+.hist { display: grid; gap: 5px; }
+.hist .row { display: grid; grid-template-columns: 62px 1fr 56px; align-items: center; gap: 8px; font-size: 11.5px; font-family: var(--mono); }
+.hist .track { height: 11px; background: var(--surface-2); border-radius: 3px; overflow: hidden; }
+.hist .fill { height: 100%; background: var(--a); border-radius: 0 3px 3px 0; transition: width 200ms ease; }
+.hist .row.hold .fill { background: var(--muted); }
+.hist .val { text-align: right; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+/* ---------- line meters ---------- */
+.meters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 560px) { .meters { grid-template-columns: minmax(0, 1fr); } }
+.meter { border: 1px solid var(--rule); border-radius: 10px; background: var(--surface-2); padding: 10px; }
+.meter .lbl { display: flex; justify-content: space-between; align-items: baseline; font-family: var(--mono); font-size: 12px; }
+.meter .lbl b { font-size: 14px; font-variant-numeric: tabular-nums; }
+.meter .track { height: 9px; border-radius: 4px; background: var(--surface-3); margin-top: 8px; overflow: hidden; position: relative; }
+.meter .fill { height: 100%; background: var(--a); border-radius: 4px; transition: width 200ms ease; }
+.meter .cap { font-size: 10.5px; color: var(--muted); font-family: var(--mono); margin-top: 5px; }
+
+/* ---------- process log ---------- */
+.log { max-height: 440px; overflow-y: auto; display: flex; flex-direction: column; gap: 7px; padding-right: 2px; }
+.entry { border: 1px solid var(--rule); border-radius: 9px; background: var(--surface-2); padding: 8px 10px; font-size: 12px; }
+.entry.act { border-left: 3px solid var(--a); }
+.entry.held { border-left: 3px solid var(--muted); }
+.entry .hd { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.entry .hr { font-family: var(--mono); font-weight: 600; font-size: 12px; }
+.entry .mv { font-family: var(--mono); font-size: 12px; font-weight: 600; }
+.entry .steps { margin: 6px 0 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.entry .steps li { display: grid; grid-template-columns: 74px 1fr; gap: 8px; font-family: var(--mono); font-size: 11px; color: var(--ink-2); }
+.entry .steps b { color: var(--muted); font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; font-size: 10px; }
+.entry .ev { margin-top: 5px; font-family: var(--mono); font-size: 10.5px; color: var(--critical); }
+.delta.up { color: var(--good-ink); }
+.delta.down { color: var(--critical); }
+
+/* ---------- findings ---------- */
+.findings { margin-top: 44px; display: flex; flex-direction: column; gap: 18px; }
+.findings .intro { display: flex; flex-direction: column; gap: 8px; }
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 14px; align-items: start; }
+.callout {
+  border: 1px solid color-mix(in srgb, var(--critical) 36%, var(--rule));
+  border-left: 3px solid var(--critical);
+  border-radius: 10px; background: color-mix(in srgb, var(--critical) 6%, var(--surface));
+  padding: 13px 15px;
+}
+.callout h3 { display: flex; align-items: center; gap: 7px; color: var(--critical); font-size: 13px; font-family: var(--mono); letter-spacing: 0.05em; text-transform: uppercase; }
+.callout p { margin-top: 7px; color: var(--ink-2); font-size: 13.5px; max-width: 72ch; }
+.bars { display: grid; gap: 9px; }
+.bars .row { display: grid; grid-template-columns: minmax(92px, 146px) 1fr 62px; gap: 10px; align-items: center; font-size: 12px; }
+.bars .val { text-align: right; font-family: var(--mono); font-size: 11.5px; font-variant-numeric: tabular-nums; color: var(--ink); white-space: nowrap; }
+.bars .name { font-size: 12px; color: var(--ink-2); line-height: 1.3; }
+.bars .plot { position: relative; height: 22px; }
+.bars .zero { position: absolute; top: -2px; bottom: -2px; width: 1px; background: var(--rule); }
+.bars .b { position: absolute; top: 3px; height: 16px; border-radius: 0; }
+.bars .b.pos { border-radius: 0 4px 4px 0; }
+.bars .b.neg { border-radius: 4px 0 0 4px; }
+.bars .lab { position: absolute; top: 3px; height: 16px; display: flex; align-items: center; white-space: nowrap; font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums; color: var(--ink); }
+.axnote { font-family: var(--mono); font-size: 10.5px; color: var(--muted); margin-top: 4px; }
+ul.notes { margin: 0; padding-left: 18px; color: var(--ink-2); font-size: 13.5px; display: grid; gap: 5px; max-width: 76ch; }
+footer.page { margin-top: 36px; padding-top: 16px; border-top: 1px solid var(--rule); color: var(--muted); font-size: 12px; font-family: var(--mono); display: grid; gap: 4px; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+</style>
+
+<div class="wrap">
+<header class="page">
+  <p class="eyebrow">Deep reinforcement learning for multi-node smart-grid balancing</p>
+  <h1>Three-Node Grid Balancer</h1>
+  <p class="lede">
+    Nodes <b>A</b> (city), <b>B</b> (suburb) and <b>C</b> (industrial) each generate and consume power on
+    their own daily cycle. Every simulated hour a controller may route <span class="num">20&nbsp;MW</span>
+    along one line to pull all three net imbalances toward zero. This runs the full simulator and its
+    physics live, hour by hour, and shows every step of the decision.
+  </p>
+</header>
+
+<div class="bar" role="group" aria-label="Simulation controls">
+  <div class="bar-group">
+    <button class="primary" id="btnPlay" aria-pressed="false">Run</button>
+    <button id="btnStep">Step 1 h</button>
+    <button id="btnReset">Reset</button>
+  </div>
+  <div class="bar-group">
+    <label class="fld" for="selCtl">Controller</label>
+    <select id="selCtl">
+      <option value="oracle">Greedy oracle — centralized</option>
+      <option value="dqn" selected>Transformer-DQN — emulated</option>
+      <option value="prop">Rule-based proportional — decentralized</option>
+      <option value="hold">Always hold — no control</option>
+      <option value="rand">Random action</option>
+    </select>
+  </div>
+  <div class="bar-group">
+    <label class="fld" for="rngSpeed">Speed</label>
+    <input type="range" id="rngSpeed" min="1" max="40" step="1" value="6" aria-label="Simulated hours per second">
+    <span class="num" id="spdOut" style="font-size:12px;color:var(--ink-2);min-width:62px">6 h/s</span>
+  </div>
+  <div class="bar-group">
+    <label class="fld" for="inpSeed">Seed</label>
+    <input type="number" id="inpSeed" value="42" min="0" max="99999" style="width:76px">
+    <label class="fld" for="inpMW">Transfer</label>
+    <input type="number" id="inpMW" value="20" min="5" max="40" step="5" style="width:64px">
+  </div>
+</div>
+
+<div class="clock">
+  <span class="big" id="clkTime">Day 1 · 06:00</span>
+  <span class="chip" id="chipRegime"><span class="dot"></span><span id="regimeTxt">Normal</span></span>
+  <span class="chip">hour <span class="num" id="stepN">0</span> of <span class="num" id="stepTot">720</span></span>
+  <span class="chip" id="chipCtl">Transformer-DQN (emulated)</span>
+  <span class="chip" id="chipRun">paused</span>
+</div>
+
+<div class="tiles">
+  <div class="tile hero">
+    <div class="k">Imbalance reduction</div>
+    <div class="v" id="tRed">0.00<span class="u">%</span></div>
+  </div>
+  <div class="tile">
+    <div class="k">Unmanaged Σ|imb|</div>
+    <div class="v" id="tUnm">0<span class="u"> MW</span></div>
+  </div>
+  <div class="tile">
+    <div class="k">Managed Σ|imb|</div>
+    <div class="v" id="tMan">0<span class="u"> MW</span></div>
+  </div>
+  <div class="tile">
+    <div class="k" id="costK">Power moved</div>
+    <div class="v" id="tCost">0<span class="u"> MW</span></div>
+  </div>
+  <div class="tile">
+    <div class="k">Active hours</div>
+    <div class="v" id="tAct">0.0<span class="u">%</span></div>
+  </div>
+  <div class="tile">
+    <div class="k">Mean reward / h</div>
+    <div class="v" id="tRew">0.00</div>
+  </div>
+</div>
+
+<div class="floor">
+  <div class="stack">
+    <section class="card">
+      <header>
+        <h2>Live transfer</h2>
+        <span class="note" id="schNote">idle</span>
+      </header>
+      <svg class="schematic" viewBox="0 0 360 318" role="img" aria-labelledby="schTitle">
+        <title id="schTitle">Three-node grid schematic with live power flow between nodes A, B and C</title>
+        <g id="edges" stroke-linecap="round" fill="none"></g>
+        <g id="flowLabels"></g>
+        <g id="nodeG"></g>
+      </svg>
+      <div class="nodes" id="nodeCards"></div>
+    </section>
+
+    <section class="card">
+      <header>
+        <h2>Line loading</h2>
+        <span class="note" id="meterNote">centralized: one 20 MW transfer per hour</span>
+      </header>
+      <div class="meters" id="meters"></div>
+    </section>
+
+    <section class="card">
+      <header>
+        <h2>Action distribution</h2>
+        <span class="note" id="histNote">share of hours so far</span>
+      </header>
+      <div class="hist" id="hist"></div>
+      <p id="histNA" hidden style="font-size:12.5px;color:var(--ink-2);max-width:58ch">
+        The proportional controller sets a standing shunt on each line rather than choosing one of
+        seven moves, so there is no action histogram. Watch the line-loading meters instead — the
+        shunts ramp at ±5 MW per hour and pin at the 25 MW capacity.
+      </p>
+    </section>
+  </div>
+
+  <div class="stack">
+    <section class="card">
+      <header>
+        <h2>Net imbalance per node</h2>
+        <span class="note">last 48 h · solid = managed, dashed = unmanaged</span>
+      </header>
+      <div class="chartbox">
+        <canvas id="cv" height="620" aria-label="Scrolling line chart of net imbalance in MW for nodes A, B and C, managed against unmanaged"></canvas>
+        <div class="tip" id="tip" hidden></div>
+      </div>
+      <div class="legend">
+        <span style="color:var(--a)"><i class="swatch" style="background:var(--a)"></i> A · city</span>
+        <span style="color:var(--b)"><i class="swatch" style="background:var(--b)"></i> B · suburb</span>
+        <span style="color:var(--c)"><i class="swatch" style="background:var(--c)"></i> C · industrial</span>
+        <span style="color:var(--muted)"><i class="swatch dash"></i> unmanaged</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <header>
+        <h2 id="decTitle">This hour's decision</h2>
+        <span class="note" id="decNote">7 discrete actions scored</span>
+      </header>
+      <p style="font-family:var(--mono);font-size:11.5px;color:var(--muted);margin-bottom:8px" id="decState">
+        observation: 6 h × 3 nodes of net imbalance ÷ 100
+      </p>
+      <div class="tblwrap"><table id="decTbl"><thead></thead><tbody></tbody></table></div>
+      <p style="font-size:11.5px;color:var(--muted);margin-top:9px;font-family:var(--mono)" id="decFoot"></p>
+    </section>
+
+    <section class="card">
+      <header>
+        <h2>Process log</h2>
+        <span class="note">newest first · every stage of each hour</span>
+      </header>
+      <div class="log" id="log"></div>
+    </section>
+  </div>
+</div>
+
+<section class="findings">
+  <div class="intro">
+    <p class="eyebrow">Measured results · training run, seed 42</p>
+    <h2>What the trained models actually achieved</h2>
+    <p class="lede">
+      The figures below are the numbers produced by the training run — a single seeded
+      run, evaluated over <span class="num">240</span> hours (10 simulated days) of unseen data with the
+      window pinned so every controller sees identical hours and identical weather.
+    </p>
+  </div>
+
+  <div class="tiles">
+    <div class="tile">
+      <div class="k">Forecaster MAE</div>
+      <div class="v">5.00<span class="u"> MW</span></div>
+    </div>
+    <div class="tile">
+      <div class="k">Forecaster RMSE</div>
+      <div class="v">7.54<span class="u"> MW</span></div>
+    </div>
+    <div class="tile">
+      <div class="k">Forecaster R²</div>
+      <div class="v">0.911</div>
+    </div>
+    <div class="tile">
+      <div class="k">Skill vs persistence</div>
+      <div class="v" style="color:var(--good-ink)">+21.2<span class="u">%</span></div>
+    </div>
+  </div>
+
+  <div class="cols">
+    <section class="card">
+      <header>
+        <h2>Imbalance reduction</h2>
+        <span class="note">higher is better · 0 % = leave the grid alone</span>
+      </header>
+      <div class="bars" id="barsRed"></div>
+      <p class="axnote">−20 %&nbsp;&nbsp;·&nbsp;&nbsp;0 %&nbsp;&nbsp;·&nbsp;&nbsp;+30 % of unmanaged Σ|imbalance|</p>
+    </section>
+
+    <section class="card">
+      <header>
+        <h2>Decision quality</h2>
+        <span class="note">agreement with the greedy oracle's label</span>
+      </header>
+      <div class="tblwrap">
+        <table>
+          <thead>
+            <tr><th>Model</th><th>Accuracy</th><th>F1 (macro)</th><th>Cohen κ</th></tr>
+          </thead>
+          <tbody class="num">
+            <tr><td>Transformer-DQN</td><td class="n">0.683</td><td class="n">0.448</td><td class="n">0.586</td></tr>
+            <tr><td>TransferAgent</td><td class="n">0.577</td><td class="n">0.312</td><td class="n">0.436</td></tr>
+            <tr><td>Always hold</td><td class="n">0.363</td><td class="n">0.089</td><td class="n">0.000</td></tr>
+            <tr><td>Random</td><td class="n">0.114</td><td class="n">0.090</td><td class="n">−0.026</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="font-size:12.5px;color:var(--ink-2);margin-top:10px;max-width:60ch">
+        Accuracy alone is misleading here: <em>Hold</em> is the oracle's own label 36.3 % of the time, so a
+        controller that never acts already scores 0.363. Cohen's κ corrects for that — it is the column
+        that separates a policy from a coin.
+      </p>
+    </section>
+  </div>
+
+  <div class="cols">
+    <section class="card">
+      <header>
+        <h2>Physical grid performance</h2>
+        <span class="note">240 h · centralized discrete control</span>
+      </header>
+      <div class="tblwrap">
+        <table>
+          <thead>
+            <tr><th>Controller</th><th>Managed Σ|imb| (MW)</th><th>Reduction</th><th>Transfers</th><th>Active h</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Transformer-DQN</td><td class="n">12 469.37</td><td class="n">23.52 %</td><td class="n">201</td><td class="n">83.75 %</td></tr>
+            <tr><td>TransferAgent</td><td class="n">12 710.78</td><td class="n">22.04 %</td><td class="n">223</td><td class="n">92.92 %</td></tr>
+            <tr><td>Greedy oracle</td><td class="n">12 327.85</td><td class="n">24.39 %</td><td class="n">150</td><td class="n">62.50 %</td></tr>
+            <tr><td>Always hold</td><td class="n">16 303.73</td><td class="n">0.00 %</td><td class="n">0</td><td class="n">0.00 %</td></tr>
+            <tr><td>Random</td><td class="n">18 734.01</td><td class="n">−14.91 %</td><td class="n">202</td><td class="n">84.17 %</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="font-size:12.5px;color:var(--ink-2);margin-top:10px;max-width:60ch">
+        Unmanaged total is <span class="num">16 303.73 MW</span> for all five rows. The DQN recovers
+        <b>96 %</b> of the control the oracle proves is achievable, and it does so while acting more often
+        than the oracle needs to — 201 transfers against 150.
+      </p>
+    </section>
+
+    <section class="card">
+      <header>
+        <h2>Decentralized control</h2>
+        <span class="note">240 h · continuous delta-control, 25 MW lines</span>
+      </header>
+      <div class="tblwrap">
+        <table>
+          <thead>
+            <tr><th>Controller</th><th>Managed Σ|imb| (MW)</th><th>Reduction</th><th>Mean |imb| / h</th><th>Peak</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Decentralized PPO</td><td class="n">17 171.44</td><td class="n" style="color:var(--critical)">−14.93 %</td><td class="n">71.55</td><td class="n">99.48</td></tr>
+            <tr><td>Rule-based proportional</td><td class="n">11 697.73</td><td class="n" style="color:var(--good-ink)">21.71 %</td><td class="n">48.74</td><td class="n">74.48</td></tr>
+            <tr><td>No control</td><td class="n">14 941.31</td><td class="n">0.00 %</td><td class="n">62.26</td><td class="n">74.48</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="font-size:12.5px;color:var(--ink-2);margin-top:10px;max-width:60ch">
+        The no-control row reducing by exactly <span class="num">0.00 %</span> is the sanity check that
+        proves the managed numbers measure the effect of the actions and nothing else.
+      </p>
+    </section>
+  </div>
+
+  <div class="callout">
+    <h3><span>▲</span> Reported negative result</h3>
+    <p>
+      The three PPO agents made the grid <b>worse</b> than leaving it alone: −14.93 % against +21.71 % for a
+      one-line proportional rule. The learned mean policy drives each line to its capacity limit and holds
+      it there, so the shunts stop tracking the imbalance. Each agent is rewarded only for its own node
+      while its imbalance also depends on the neighbour's line, and a ±5 MW/hour delta cannot follow a
+      signal whose hourly swings are several times larger. Balancing the critic loss and raising the
+      learning rate were both measured and did not fix it, so this is reported rather than tuned away: on
+      this problem the simple proportional rule is the better decentralized controller, and the centralized
+      agent is better still.
+    </p>
+  </div>
+
+  <section class="card">
+    <header><h2>How each hour is computed</h2></header>
+    <ul class="notes">
+      <li><b>Generate.</b> Load and generation per node from node-specific diurnal sinusoids — solar-peaked A, wind and night-peaked B, industrial C on a 12 h load cycle — times a daily weather multiplier, plus AR(1) random-walk noise with momentum 0.85.</li>
+      <li><b>Weather.</b> A 3-state daily Markov chain (normal / heatwave / storm). Heatwave scales load ×1.35, solar ×1.15, wind ×0.50; storm scales load ×0.90, solar ×0.15, wind ×1.80. The controllers never observe this state.</li>
+      <li><b>Rare events.</b> Industrial demand spikes of 30–60 MW at node C (p = 0.02/h), total solar outage at A (p = 0.005/h), and suburb load collapse to 20 % at B (p = 0.01/h).</li>
+      <li><b>Observe.</b> Net imbalance G − L per node, in MW, divided by 100 so every model input sits roughly in [−1, 1]. The controller sees a 6-hour window, nothing else.</li>
+      <li><b>Decide.</b> One of 7 discrete actions: hold, or move the transfer amount along one of 6 directed node pairs.</li>
+      <li><b>Settle.</b> The transfer is added to one node's imbalance and subtracted from the other. Reward is <span class="num">(Σ|pre| − Σ|post| − penalty × moved) / 10</span> — how many MW of grid stress the action actually removed, not the absolute stress level.</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <header><h2>Limitations</h2></header>
+    <ul class="notes">
+      <li>The grid is synthetic: no real weather, demand or price data.</li>
+      <li>The transmission model has no losses and no line impedance — a transfer arrives in full.</li>
+      <li>The centralized action set allows exactly one transfer per hour, so the oracle's reduction is a genuine ceiling for that action space, not for the problem.</li>
+      <li>Each published figure is a single seeded run, not a mean over seeds.</li>
+      <li>The <b>Transformer-DQN</b> option in the live simulator is a behavioural emulation — the oracle's scoring with the measured 68.3 % oracle agreement and bias toward acting. It is not the trained Keras network, which cannot run in a browser. The oracle, proportional, hold and random controllers above it are the exact policies from the trained system, computed here in full.</li>
+    </ul>
+  </section>
+</section>
+
+<footer class="page">
+  <span>Simulator components: generate_complex_data, FastEnv, PettingZooGridEnv, make_proportional_policy.</span>
+  <span>Ported to the browser; physics, parameters and reward identical to the training environment. Seed changes the noise draw, not the model.</span>
+</footer>
+</div>
+
+<script>
+"use strict";
+
+/* ========================= deterministic RNG ========================= */
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function makeRng(seed) {
+  const u = mulberry32(seed >>> 0);
+  let spare = null;
+  return {
+    uniform: (lo, hi) => lo + (hi - lo) * u(),
+    normal(mu, sd) {                      // Box–Muller, one cached spare
+      if (spare !== null) { const v = spare; spare = null; return mu + sd * v; }
+      let a = 0, b = 0;
+      while (a === 0) a = u();
+      b = u();
+      const r = Math.sqrt(-2 * Math.log(a)), th = 2 * Math.PI * b;
+      spare = r * Math.sin(th);
+      return mu + sd * r * Math.cos(th);
+    },
+    bernoulli: (p) => (u() < p ? 1 : 0),
+    choice3(probs) {
+      const x = u();
+      let acc = 0;
+      for (let i = 0; i < 3; i++) { acc += probs[i]; if (x < acc) return i; }
+      return 2;
+    }
+  };
+}
+
+/* ========================= grid simulator =========================
+   Port of generate_complex_data(days, seed). Same cycles, same weather chain,
+   same noise process, same rare-event probabilities. */
+const TRANS_MAT = [[0.85, 0.10, 0.05], [0.20, 0.80, 0.00], [0.30, 0.00, 0.70]];
+const REGIMES = [
+  { name: "Normal",   cls: "normal",   load: 1.00, solar: 1.00, wind: 1.00 },
+  { name: "Heatwave", cls: "heatwave", load: 1.35, solar: 1.15, wind: 0.50 },
+  { name: "Storm",    cls: "storm",    load: 0.90, solar: 0.15, wind: 1.80 }
+];
+
+function generateGrid(days, seed) {
+  const rng = makeRng(seed);
+  const hrs = days * 24;
+
+  const regimeDay = new Int32Array(days);
+  for (let d = 1; d < days; d++) regimeDay[d] = rng.choice3(TRANS_MAT[regimeDay[d - 1]]);
+
+  const loadM = new Float64Array(hrs), solarM = new Float64Array(hrs), windM = new Float64Array(hrs);
+  const regime = new Int32Array(hrs);
+  for (let d = 0; d < days; d++) {
+    const r = REGIMES[regimeDay[d]];
+    for (let h = d * 24; h < (d + 1) * 24; h++) {
+      loadM[h] = r.load; solarM[h] = r.solar; windM[h] = r.wind; regime[h] = regimeDay[d];
+    }
+  }
+
+  // AR(1) random walk, momentum 0.85
+  const rw = (scale) => {
+    const n = new Float64Array(hrs);
+    for (let i = 1; i < hrs; i++) n[i] = 0.85 * n[i - 1] + rng.normal(0, scale);
+    return n;
+  };
+  const nLA = rw(1.5), nGA = rw(2.5), nLB = rw(2.0), nGB = rw(3.5), nLC = rw(2.0), nGC = rw(2.0);
+
+  const LA = new Float64Array(hrs), GA = new Float64Array(hrs);
+  const LB = new Float64Array(hrs), GB = new Float64Array(hrs);
+  const LC = new Float64Array(hrs), GC = new Float64Array(hrs);
+  const events = [];
+  const TAU = 2 * Math.PI;
+
+  for (let t = 0; t < hrs; t++) {
+    LA[t] = (50 + 20 * Math.sin((t - 14) * (TAU / 24))) * loadM[t] + nLA[t];
+    GA[t] = Math.max((40 + 35 * Math.sin((t - 6) * (TAU / 24))) * solarM[t] + nGA[t], 0);
+
+    LB[t] = (40 + 15 * Math.sin((t - 8) * (TAU / 12))) * loadM[t] + nLB[t];
+    GB[t] = Math.max((30 + 20 * Math.sin((t - 20) * (TAU / 24))) * windM[t] + nGB[t], 0);
+
+    LC[t] = (45 + 30 * Math.sin((t - 10) * (TAU / 24))) * loadM[t] + nLC[t];
+    GC[t] = Math.max(35 + 20 * Math.sin((t - 9) * (TAU / 24)) + nGC[t], 0);   // C generation is weather-independent
+
+    const ev = [];
+    if (rng.bernoulli(0.02)) { const s = rng.uniform(30, 60); LC[t] += s; ev.push("demand spike at C +" + s.toFixed(0) + " MW"); }
+    if (rng.bernoulli(0.005)) { GA[t] = 0; ev.push("solar outage at A — generation to 0"); }
+    if (rng.bernoulli(0.01)) { LB[t] *= 0.2; ev.push("load collapse at B — down to 20 %"); }
+    events.push(ev);
+  }
+
+  const net = new Float64Array(hrs * 3);
+  for (let t = 0; t < hrs; t++) {
+    net[t * 3]     = GA[t] - LA[t];
+    net[t * 3 + 1] = GB[t] - LB[t];
+    net[t * 3 + 2] = GC[t] - LC[t];
+  }
+  return { hrs, days, regime, events, L: [LA, LB, LC], G: [GA, GB, GC], net };
+}
+
+/* ========================= FastEnv physics ========================= */
+const ACTION_MAP = ["Hold", "A → B", "B → C", "C → A", "B → A", "C → B", "A → C"];
+const ACTION_DELTAS = [
+  [0, 0, 0], [-1, 1, 0], [0, -1, 1], [1, 0, -1], [1, -1, 0], [0, 1, -1], [-1, 0, 1]
+];
+const ACTION_PAIR = [null, [0, 1], [1, 2], [2, 0], [1, 0], [2, 1], [0, 2]];  // [from, to]
+const IMB_SCALE = 100, LOOKBACK = 6;
+const NODES = [
+  { id: "A", name: "City",       v: "--a" },
+  { id: "B", name: "Suburb",     v: "--b" },
+  { id: "C", name: "Industrial", v: "--c" }
+];
+
+const applyAction = (pre, a, mw) => pre.map((x, i) => x + ACTION_DELTAS[a][i] * mw);
+const stress = (v) => Math.abs(v[0]) + Math.abs(v[1]) + Math.abs(v[2]);
+
+/* ========================= controllers ========================= */
+// Greedy oracle: the action minimising Σ|imbalance| after the transfer. Only leaves
+// Hold when some transfer is *strictly* better, which is why Hold dominates its labels.
+function oracleAction(pre, mw) {
+  let best = 0, bestS = stress(pre);
+  for (let a = 1; a < 7; a++) {
+    const s = stress(applyAction(pre, a, mw));
+    if (s < bestS) { bestS = s; best = a; }
+  }
+  return best;
+}
+
+/* Behavioural emulation of the trained Transformer-DQN. Not the Keras network: it takes
+   the oracle action with probability 0.683 — the oracle agreement measured during evaluation —
+   and otherwise picks among the remaining actions by a softmax on their own scores, with Hold
+   down-weighted so it shares the trained agent's bias toward acting more often than the oracle
+   needs to. Agreement is matched exactly; the active-hour share lands near 70 %, below the
+   measured 83.75 %, because that figure and the 0.683 come from two different evaluations and
+   no single mixture reproduces both. */
+const DQN_AGREEMENT = 0.683, DQN_TEMP = 26, DQN_HOLD_BIAS = 0.04;
+function dqnAction(pre, mw, rng) {
+  const best = oracleAction(pre, mw);
+  if (rng.uniform(0, 1) < DQN_AGREEMENT) return best;
+  const w = [], idx = [];
+  for (let a = 0; a < 7; a++) {
+    if (a === best) continue;
+    const gain = stress(pre) - stress(applyAction(pre, a, mw));
+    let wt = Math.exp(gain / DQN_TEMP);
+    if (a === 0) wt *= DQN_HOLD_BIAS;
+    w.push(wt); idx.push(a);
+  }
+  const tot = w.reduce((s, x) => s + x, 0);
+  let x = rng.uniform(0, tot);
+  for (let i = 0; i < w.length; i++) { x -= w[i]; if (x <= 0) return idx[i]; }
+  return idx[idx.length - 1];
+}
+
+/* Rule-based proportional controller, from make_proportional_policy. Each node owns one
+   directed line (A→B, B→C, C→A) and drives it toward exporting its own surplus, moving at
+   most MAX_DELTA MW per hour and clipped to the line capacity. Flow is one-way. */
+const MAX_CAPACITY = 25, MAX_DELTA = 5, PENALTY_COEF = 0.05;
+const LINE_OF = ["AB", "BC", "CA"];
+function proportionalActions(pre, shunts) {
+  const out = [0, 0, 0];
+  for (let n = 0; n < 3; n++) {
+    const target = Math.max(-MAX_CAPACITY, Math.min(MAX_CAPACITY, pre[n]));
+    const delta = (target - shunts[LINE_OF[n]]) / MAX_DELTA;
+    out[n] = Math.max(-1, Math.min(1, delta));
+  }
+  return out;
+}
+// Directed shunt physics: c_A = raw_A − s_AB + s_CA, and so round the ring.
+function settleShunts(pre, shunts) {
+  return [
+    pre[0] - shunts.AB + shunts.CA,
+    pre[1] - shunts.BC + shunts.AB,
+    pre[2] - shunts.CA + shunts.BC
+  ];
+}
+
+const CONTROLLERS = {
+  oracle: { label: "Greedy oracle", kind: "discrete", note: "exact policy — the ceiling for one transfer per hour" },
+  dqn:    { label: "Transformer-DQN (emulated)", kind: "discrete", note: "oracle scoring at the measured 68.3 % agreement" },
+  prop:   { label: "Rule-based proportional", kind: "continuous", note: "exact policy — three one-way lines, ±5 MW/h" },
+  hold:   { label: "Always hold", kind: "discrete", note: "exact policy — the do-nothing baseline" },
+  rand:   { label: "Random action", kind: "discrete", note: "exact policy — uniform over the 7 actions" }
+};
+
+/* ========================= state ========================= */
+const S = {
+  grid: null, t: LOOKBACK, running: false, speed: 6, seed: 42, mw: 20,
+  ctl: "dqn", rng: null,
+  cumUnmanaged: 0, cumManaged: 0, cumMoved: 0, active: 0, steps: 0, cumReward: 0,
+  counts: new Array(7).fill(0),
+  shunts: { AB: 0, BC: 0, CA: 0 },
+  hist: [],          // {t, pre[], post[], action, reward, regime, events[], shunts, deltas}
+  last: null,
+  hover: null
+};
+const DAYS = 30;
+
+/* ========================= DOM ========================= */
+const $ = (id) => document.getElementById(id);
+const el = {
+  play: $("btnPlay"), step: $("btnStep"), reset: $("btnReset"),
+  ctl: $("selCtl"), speed: $("rngSpeed"), spdOut: $("spdOut"),
+  seed: $("inpSeed"), mw: $("inpMW"),
+  clk: $("clkTime"), regime: $("chipRegime"), regimeTxt: $("regimeTxt"),
+  stepN: $("stepN"), stepTot: $("stepTot"), chipCtl: $("chipCtl"), chipRun: $("chipRun"),
+  tRed: $("tRed"), tUnm: $("tUnm"), tMan: $("tMan"), tCost: $("tCost"), tAct: $("tAct"), tRew: $("tRew"),
+  edges: $("edges"), flowLabels: $("flowLabels"), nodeG: $("nodeG"), nodeCards: $("nodeCards"),
+  schNote: $("schNote"), meters: $("meters"), meterNote: $("meterNote"), hist: $("hist"),
+  cv: $("cv"), tip: $("tip"),
+  decTbl: $("decTbl"), decTitle: $("decTitle"), decNote: $("decNote"), decState: $("decState"), decFoot: $("decFoot"),
+  histNA: $("histNA"), histNote: $("histNote"), costK: $("costK"),
+  log: $("log"), barsRed: $("barsRed")
+};
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const fmt = (x, d = 1) => (x < 0 ? "−" : "") + Math.abs(x).toFixed(d);
+const fmtInt = (x) => Math.round(x).toLocaleString("en-US").replace(/,/g, " ");
+const signed = (x, d = 1) => (x >= 0 ? "+" : "−") + Math.abs(x).toFixed(d);
+
+/* ========================= static schematic ========================= */
+const POS = [{ x: 180, y: 62 }, { x: 54, y: 250 }, { x: 306, y: 250 }];
+const EDGES = [
+  { a: 0, b: 1, id: "AB" },
+  { a: 1, b: 2, id: "BC" },
+  { a: 2, b: 0, id: "CA" }
+];
+const NS = "http://www.w3.org/2000/svg";
+function mk(tag, attrs, text) {
+  const n = document.createElementNS(NS, tag);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  if (text != null) n.textContent = text;
+  return n;
+}
+
+function buildSchematic() {
+  el.edges.textContent = ""; el.nodeG.textContent = ""; el.flowLabels.textContent = "";
+  EDGES.forEach((e, i) => {
+    const p1 = POS[e.a], p2 = POS[e.b];
+    el.edges.appendChild(mk("line", {
+      x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y,
+      stroke: css("--rule"), "stroke-width": 2.5, id: "base" + i
+    }));
+    el.edges.appendChild(mk("line", {
+      x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y,
+      stroke: css("--a"), "stroke-width": 0, "stroke-dasharray": "7 9",
+      id: "flow" + i, opacity: 0
+    }));
+    const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
+    const off = i === 1 ? 20 : (i === 0 ? -24 : 24);
+    el.flowLabels.appendChild(mk("text", {
+      x: mx + off, y: my + (i === 1 ? 17 : 0), id: "fl" + i,
+      "text-anchor": "middle", "font-size": 11, "font-weight": 600,
+      fill: css("--muted"), opacity: 0
+    }, ""));
+  });
+
+  NODES.forEach((n, i) => {
+    const p = POS[i], col = css(n.v);
+    const g = mk("g", { id: "ng" + i });
+    g.appendChild(mk("circle", { cx: p.x, cy: p.y, r: 34, fill: css("--surface"), stroke: css("--rule"), "stroke-width": 1.5 }));
+    g.appendChild(mk("circle", { cx: p.x, cy: p.y, r: 34, fill: "none", stroke: col, "stroke-width": 3,
+      "stroke-dasharray": "0 400", "stroke-linecap": "round",
+      transform: "rotate(-90 " + p.x + " " + p.y + ")", id: "arc" + i }));
+    g.appendChild(mk("text", { x: p.x, y: p.y - 3, "text-anchor": "middle", "font-size": 19, "font-weight": 700, fill: col }, n.id));
+    g.appendChild(mk("text", { x: p.x, y: p.y + 13, "text-anchor": "middle", "font-size": 10.5, fill: css("--muted"), id: "nv" + i }, "0 MW"));
+    const ly = i === 0 ? p.y - 46 : p.y + 52;
+    g.appendChild(mk("text", { x: p.x, y: ly, "text-anchor": "middle", "font-size": 10.5, "letter-spacing": "0.08em", fill: css("--ink-2") }, n.name.toUpperCase()));
+    el.nodeG.appendChild(g);
+  });
+}
+
+function buildNodeCards() {
+  el.nodeCards.textContent = "";
+  NODES.forEach((n, i) => {
+    const d = document.createElement("div");
+    d.className = "node";
+    d.style.setProperty("--nc", "var(" + n.v + ")");
+    d.innerHTML =
+      '<div class="nm"><b>' + n.id + '</b> <span>' + n.name + '</span></div>' +
+      '<dl>' +
+      '<dt>load</dt><dd id="cl' + i + '">—</dd>' +
+      '<dt>gen</dt><dd id="cg' + i + '">—</dd>' +
+      '<dt>net</dt><dd id="cn' + i + '">—</dd>' +
+      '<dt>after</dt><dd id="cp' + i + '">—</dd>' +
+      '</dl>' +
+      '<div class="imbbar"><i></i><span id="cb' + i + '" style="left:50%;width:0"></span></div>';
+    el.nodeCards.appendChild(d);
+  });
+}
+
+function buildMeters() {
+  el.meters.textContent = "";
+  ["AB", "BC", "CA"].forEach((id, i) => {
+    const d = document.createElement("div");
+    d.className = "meter";
+    d.innerHTML =
+      '<div class="lbl"><span id="ml' + i + '">' + id[0] + ' – ' + id[1] + '</span><b id="mv' + i + '">0.0</b></div>' +
+      '<div class="track"><div class="fill" id="mf' + i + '" style="width:0"></div></div>' +
+      '<div class="cap" id="mc' + i + '">idle</div>';
+    el.meters.appendChild(d);
+  });
+}
+
+function buildHist() {
+  el.hist.textContent = "";
+  ACTION_MAP.forEach((a, i) => {
+    const d = document.createElement("div");
+    d.className = "row" + (i === 0 ? " hold" : "");
+    d.innerHTML = '<span>' + a + '</span><div class="track"><div class="fill" id="hf' + i + '" style="width:0"></div></div><span class="val" id="hv' + i + '">0 %</span>';
+    el.hist.appendChild(d);
+  });
+}
+
+/* ========================= findings bar chart ========================= */
+const RED_ROWS = [
+  { n: "Greedy oracle", sub: "centralized ceiling", v: 24.39, c: "--a" },
+  { n: "Transformer-DQN", sub: "attention DQN", v: 23.52, c: "--a" },
+  { n: "TransferAgent", sub: "frozen LSTM backbone", v: 22.04, c: "--a" },
+  { n: "Rule-based prop.", sub: "decentralized rule", v: 21.71, c: "--c" },
+  { n: "No control", sub: "sanity check", v: 0.00, c: "--muted" },
+  { n: "Random action", sub: "centralized", v: -14.91, c: "--critical" },
+  { n: "Decentralized PPO", sub: "three PPO agents", v: -14.93, c: "--critical" }
+];
+function buildBars() {
+  el.barsRed.textContent = "";
+  const lo = -20, hi = 30, span = hi - lo;
+  const pct = (v) => ((v - lo) / span) * 100;
+  RED_ROWS.forEach((r) => {
+    const row = document.createElement("div");
+    row.className = "row";
+    const z = pct(0), p = pct(r.v);
+    const left = Math.min(z, p), width = Math.abs(p - z);
+    row.innerHTML =
+      '<div class="name"><b>' + r.n + '</b><br><span style="color:var(--muted);font-size:11px">' + r.sub + '</span></div>' +
+      '<div class="plot">' +
+        '<div class="zero" style="left:' + z + '%"></div>' +
+        '<div class="b ' + (r.v >= 0 ? "pos" : "neg") + '" style="left:' + left + '%;width:' + width + '%;background:var(' + r.c + ')" title="' + r.n + ': ' + signed(r.v, 2) + ' % of unmanaged total"></div>' +
+      '</div>' +
+      '<div class="val">' + signed(r.v, 2) + ' %</div>';
+    el.barsRed.appendChild(row);
+  });
+}
+
+/* ========================= simulation step ========================= */
+function controllerStep(pre) {
+  const ctl = S.ctl;
+  const out = { kind: CONTROLLERS[ctl].kind };
+
+  if (out.kind === "continuous") {
+    const acts = proportionalActions(pre, S.shunts);
+    const before = { AB: S.shunts.AB, BC: S.shunts.BC, CA: S.shunts.CA };
+    let moved = 0;
+    for (let n = 0; n < 3; n++) {
+      const line = LINE_OF[n];
+      const next = Math.max(0, Math.min(MAX_CAPACITY, S.shunts[line] + acts[n] * MAX_DELTA));
+      moved += Math.abs(next - S.shunts[line]);
+      S.shunts[line] = next;
+    }
+    const post = settleShunts(pre, S.shunts);
+    const penalty = PENALTY_COEF * (Math.abs(S.shunts.AB) + Math.abs(S.shunts.BC) + Math.abs(S.shunts.CA));
+    out.post = post;
+    out.moved = moved;
+    out.reward = (stress(pre) - stress(post) - penalty) / 10;
+    out.acts = acts;
+    out.before = before;
+    out.action = moved > 1e-9 ? -1 : 0;
+    return out;
+  }
+
+  // discrete: score all seven actions, then let the controller choose
+  const scores = [];
+  for (let a = 0; a < 7; a++) {
+    const post = applyAction(pre, a, S.mw);
+    const moved = a === 0 ? 0 : S.mw;
+    scores.push({ a, post, s: stress(post), gain: stress(pre) - stress(post), reward: (stress(pre) - stress(post)) / 10, moved });
+  }
+  const best = oracleAction(pre, S.mw);
+  let chosen;
+  if (ctl === "oracle") chosen = best;
+  else if (ctl === "hold") chosen = 0;
+  else if (ctl === "rand") chosen = Math.floor(S.rng.uniform(0, 7)) % 7;
+  else chosen = dqnAction(pre, S.mw, S.rng);
+
+  out.scores = scores; out.best = best; out.action = chosen;
+  out.post = scores[chosen].post;
+  out.moved = scores[chosen].moved;
+  out.reward = scores[chosen].reward;
+  return out;
+}
+
+function stepOnce() {
+  const g = S.grid;
+  if (S.t >= g.hrs - 1) { setRunning(false); return false; }
+  const t = S.t;
+  const pre = [g.net[t * 3], g.net[t * 3 + 1], g.net[t * 3 + 2]];
+
+  const r = controllerStep(pre);
+
+  S.cumUnmanaged += stress(pre);
+  S.cumManaged += stress(r.post);
+  S.cumMoved += r.moved;
+  S.cumReward += r.reward;
+  if (r.moved > 1e-9) S.active++;
+  S.steps++;
+  if (r.kind === "discrete") S.counts[r.action]++;
+
+  const rec = {
+    t, pre, post: r.post, action: r.action, reward: r.reward, moved: r.moved,
+    regime: g.regime[t], events: g.events[t], kind: r.kind,
+    acts: r.acts || null, shunts: { AB: S.shunts.AB, BC: S.shunts.BC, CA: S.shunts.CA },
+    before: r.before || null, scores: r.scores || null, best: r.best
+  };
+  S.last = rec;
+  S.hist.push(rec);
+  if (S.hist.length > 400) S.hist.shift();
+  S.t++;
+  return true;
+}
+
+/* ========================= rendering ========================= */
+function renderClock() {
+  const t = S.last ? S.last.t : S.t;
+  const day = Math.floor(t / 24) + 1, hr = t % 24;
+  el.clk.textContent = "Day " + day + " · " + String(hr).padStart(2, "0") + ":00";
+  const rg = REGIMES[S.grid.regime[Math.min(t, S.grid.hrs - 1)]];
+  el.regime.className = "chip " + rg.cls;
+  el.regimeTxt.textContent = rg.name;
+  el.stepN.textContent = S.steps;
+  el.stepTot.textContent = S.grid.hrs - LOOKBACK;
+  el.chipCtl.textContent = CONTROLLERS[S.ctl].label;
+  el.chipRun.textContent = S.running ? "running" : "paused";
+}
+
+function renderTiles() {
+  const red = S.cumUnmanaged > 0 ? (1 - S.cumManaged / S.cumUnmanaged) * 100 : 0;
+  el.tRed.innerHTML = signed(red, 2) + '<span class="u">%</span>';
+  el.tRed.style.color = S.steps === 0 ? "" : (red > 0.05 ? "var(--good-ink)" : red < -0.05 ? "var(--critical)" : "");
+  el.tUnm.innerHTML = fmtInt(S.cumUnmanaged) + '<span class="u"> MW</span>';
+  el.tMan.innerHTML = fmtInt(S.cumManaged) + '<span class="u"> MW</span>';
+  const cont = CONTROLLERS[S.ctl].kind === "continuous";
+  el.costK.textContent = cont ? "Shunt adjustment" : "Power moved";
+  el.tCost.innerHTML = fmtInt(S.cumMoved) + '<span class="u"> MW</span>';
+  el.tAct.innerHTML = (S.steps ? (S.active / S.steps) * 100 : 0).toFixed(1) + '<span class="u">%</span>';
+  el.tRew.textContent = S.steps ? signed(S.cumReward / S.steps, 2) : "0.00";
+}
+
+function renderSchematic() {
+  const rec = S.last;
+  // flows per edge, signed along the edge's own a→b direction
+  const flow = [0, 0, 0];
+  if (rec) {
+    if (rec.kind === "continuous") {
+      flow[0] = rec.shunts.AB; flow[1] = rec.shunts.BC; flow[2] = rec.shunts.CA;
+    } else if (rec.action > 0) {
+      const [from, to] = ACTION_PAIR[rec.action];
+      for (let i = 0; i < 3; i++) {
+        const e = EDGES[i];
+        if (e.a === from && e.b === to) flow[i] = S.mw;
+        else if (e.b === from && e.a === to) flow[i] = -S.mw;
+      }
+    }
+  }
+
+  EDGES.forEach((e, i) => {
+    const f = flow[i], mag = Math.abs(f);
+    const ln = document.getElementById("flow" + i);
+    const lb = document.getElementById("fl" + i);
+    if (mag < 1e-9) {
+      ln.setAttribute("stroke-width", 0); ln.setAttribute("opacity", 0);
+      lb.setAttribute("opacity", 0);
+      return;
+    }
+    const p1 = POS[e.a], p2 = POS[e.b];
+    const fwd = f > 0;
+    ln.setAttribute("x1", fwd ? p1.x : p2.x); ln.setAttribute("y1", fwd ? p1.y : p2.y);
+    ln.setAttribute("x2", fwd ? p2.x : p1.x); ln.setAttribute("y2", fwd ? p2.y : p1.y);
+    ln.setAttribute("stroke", css("--a"));
+    ln.setAttribute("stroke-width", 2.5 + Math.min(mag / MAX_CAPACITY, 1.6) * 4.5);
+    ln.setAttribute("opacity", 0.95);
+    ln.setAttribute("stroke-dashoffset", -phase);
+    const fromId = fwd ? NODES[e.a].id : NODES[e.b].id;
+    const toId = fwd ? NODES[e.b].id : NODES[e.a].id;
+    lb.textContent = fromId + "→" + toId + "  " + mag.toFixed(1) + " MW";
+    lb.setAttribute("fill", css("--ink"));
+    lb.setAttribute("opacity", 1);
+  });
+
+  NODES.forEach((n, i) => {
+    const v = rec ? rec.post[i] : 0;
+    const mag = Math.min(Math.abs(v) / 80, 1);
+    const circ = 2 * Math.PI * 34;
+    const arc = document.getElementById("arc" + i);
+    arc.setAttribute("stroke-dasharray", (mag * circ).toFixed(1) + " " + circ.toFixed(1));
+    arc.setAttribute("stroke", Math.abs(v) > 55 ? css("--critical") : css(n.v));
+    const tv = document.getElementById("nv" + i);
+    tv.textContent = fmt(v, 1) + " MW";
+    tv.setAttribute("fill", css("--muted"));
+  });
+
+  if (!rec) { el.schNote.textContent = "idle"; return; }
+  if (rec.kind === "continuous") {
+    el.schNote.textContent = "shunts " + rec.shunts.AB.toFixed(1) + " / " + rec.shunts.BC.toFixed(1) + " / " + rec.shunts.CA.toFixed(1) + " MW";
+  } else {
+    el.schNote.textContent = rec.action === 0 ? "holding — no transfer this hour"
+      : ACTION_MAP[rec.action] + " · " + S.mw.toFixed(0) + " MW";
+  }
+}
+
+function renderNodeCards() {
+  const rec = S.last, g = S.grid;
+  const t = rec ? rec.t : S.t;
+  NODES.forEach((n, i) => {
+    const L = g.L[i][t], G = g.G[i][t];
+    const pre = rec ? rec.pre[i] : G - L, post = rec ? rec.post[i] : G - L;
+    $("cl" + i).textContent = L.toFixed(1);
+    $("cg" + i).textContent = G.toFixed(1);
+    $("cn" + i).textContent = fmt(pre, 1);
+    const pd = $("cp" + i);
+    pd.textContent = fmt(post, 1);
+    pd.style.color = Math.abs(post) < Math.abs(pre) - 0.01 ? "var(--good-ink)"
+      : Math.abs(post) > Math.abs(pre) + 0.01 ? "var(--critical)" : "";
+    const b = $("cb" + i), mag = Math.min(Math.abs(post) / 80, 1) * 50;
+    if (post >= 0) { b.style.left = "50%"; b.style.width = mag + "%"; }
+    else { b.style.left = (50 - mag) + "%"; b.style.width = mag + "%"; }
+  });
+}
+
+function renderMeters() {
+  const rec = S.last;
+  const cont = S.ctl === "prop";
+  el.meterNote.textContent = cont
+    ? "decentralized: standing shunts, ±5 MW/h, 25 MW cap"
+    : "centralized: one " + S.mw.toFixed(0) + " MW transfer per hour";
+  ["AB", "BC", "CA"].forEach((id, i) => {
+    let mw = 0, cap = MAX_CAPACITY, note = "idle";
+    if (cont && rec) {
+      mw = rec.shunts[id];
+      const d = rec.before ? mw - rec.before[id] : 0;
+      note = Math.abs(d) < 1e-9 ? "held at limit" : (d > 0 ? "ramping up " + signed(d, 2) + " MW" : "ramping down " + signed(d, 2) + " MW");
+      if (mw >= MAX_CAPACITY - 1e-6) note = "at 25 MW capacity";
+    } else if (!cont && rec && rec.action > 0) {
+      const [from, to] = ACTION_PAIR[rec.action];
+      const e = EDGES[i];
+      if ((e.a === from && e.b === to) || (e.b === from && e.a === to)) {
+        mw = S.mw; cap = S.mw;
+        note = "carrying " + NODES[from].id + " → " + NODES[to].id + " this hour";
+      }
+    }
+    // Directed line names only mean something for the standing shunts; a centralized
+    // transfer can run either way along the same pair, so label it as a pair.
+    $("ml" + i).textContent = cont ? id[0] + " → " + id[1] : id[0] + " – " + id[1];
+    $("mv" + i).textContent = mw.toFixed(1);
+    $("mf" + i).style.width = Math.min(mw / cap, 1) * 100 + "%";
+    $("mf" + i).style.background = cont && mw >= MAX_CAPACITY - 1e-6 ? "var(--warning)" : "var(--a)";
+    $("mc" + i).textContent = note;
+  });
+}
+
+function renderHistogram() {
+  const cont = CONTROLLERS[S.ctl].kind === "continuous";
+  el.hist.hidden = cont;
+  el.histNA.hidden = !cont;
+  el.histNote.textContent = cont ? "continuous control — no discrete actions" : "share of hours so far";
+  if (cont) return;
+  const tot = S.counts.reduce((a, b) => a + b, 0) || 1;
+  const max = Math.max(...S.counts, 1);
+  for (let i = 0; i < 7; i++) {
+    $("hf" + i).style.width = (S.counts[i] / max) * 100 + "%";
+    $("hv" + i).textContent = ((S.counts[i] / tot) * 100).toFixed(1) + " %";
+  }
+}
+
+function renderDecision() {
+  const rec = S.last;
+  const thead = el.decTbl.querySelector("thead"), tbody = el.decTbl.querySelector("tbody");
+  if (!rec) {
+    thead.innerHTML = ""; tbody.innerHTML = '<tr><td colspan="6" style="text-align:left;color:var(--muted)">Press Run or Step to compute the first hour.</td></tr>';
+    el.decFoot.textContent = "";
+    return;
+  }
+
+  if (rec.kind === "continuous") {
+    el.decTitle.textContent = "This hour's decision — three agents";
+    el.decNote.textContent = "one line each, continuous delta";
+    el.decState.textContent = "each agent sees [own imbalance, hour, two neighbours, own line loading] × 6 h";
+    thead.innerHTML = '<tr><th>Agent</th><th>Own imb.</th><th>Line</th><th>Action a</th><th>Δ shunt</th><th>New shunt</th></tr>';
+    tbody.innerHTML = NODES.map((n, i) => {
+      const line = LINE_OF[i];
+      const d = rec.shunts[line] - (rec.before ? rec.before[line] : 0);
+      return '<tr><td><b style="color:var(' + n.v + ')">' + n.id + '</b> ' + n.name + '</td>' +
+        '<td class="n">' + fmt(rec.pre[i], 1) + '</td>' +
+        '<td class="n">' + line[0] + '→' + line[1] + '</td>' +
+        '<td class="n">' + signed(rec.acts[i], 3) + '</td>' +
+        '<td class="n">' + signed(d, 2) + '</td>' +
+        '<td class="n">' + rec.shunts[line].toFixed(2) + ' MW</td></tr>';
+    }).join("");
+    const pen = PENALTY_COEF * (rec.shunts.AB + rec.shunts.BC + rec.shunts.CA);
+    el.decFoot.textContent = "Σ|pre| " + stress(rec.pre).toFixed(1) + " MW → Σ|post| " + stress(rec.post).toFixed(1) +
+      " MW · transmission penalty " + pen.toFixed(2) + " · reward " + signed(rec.reward, 3);
+    return;
+  }
+
+  el.decTitle.textContent = "This hour's decision";
+  el.decNote.textContent = "all 7 discrete actions scored";
+  el.decState.textContent = "observation: last 6 h × 3 nodes of net imbalance ÷ 100 · current row [" +
+    rec.pre.map((x) => (x / IMB_SCALE).toFixed(3)).join(", ") + "]";
+  thead.innerHTML = '<tr><th>Action</th><th>A after</th><th>B after</th><th>C after</th><th>Σ|imb|</th><th>Δ stress</th><th>Reward</th></tr>';
+  tbody.innerHTML = rec.scores.map((s) => {
+    const sel = s.a === rec.action, bst = s.a === rec.best;
+    return '<tr class="' + (sel ? "sel " : "") + (bst ? "best" : "") + '">' +
+      '<td>' + ACTION_MAP[s.a] +
+        (sel ? '<span class="badge ' + (s.a === 0 ? "hold" : "pick") + '">chosen</span>' : "") + '</td>' +
+      '<td class="n">' + fmt(s.post[0], 1) + '</td>' +
+      '<td class="n">' + fmt(s.post[1], 1) + '</td>' +
+      '<td class="n">' + fmt(s.post[2], 1) + '</td>' +
+      '<td class="n">' + s.s.toFixed(1) + '</td>' +
+      '<td class="n ' + (s.gain > 0.01 ? "delta up" : s.gain < -0.01 ? "delta down" : "") + '">' + signed(s.gain, 1) + '</td>' +
+      '<td class="n">' + signed(s.reward, 2) + '</td></tr>';
+  }).join("");
+  const agree = rec.action === rec.best;
+  const gap = rec.scores[rec.action].s - rec.scores[rec.best].s;
+  el.decFoot.textContent = "★ marks the greedy optimum (" + ACTION_MAP[rec.best] + ") · controller chose " +
+    ACTION_MAP[rec.action] + (agree ? " — agrees" : gap < 0.05
+      ? " — a different action, but it ties on Σ|imbalance|"
+      : " — disagrees, costing " + gap.toFixed(1) + " MW of stress this hour");
+}
+
+// Several actions often land on exactly the same Σ|imbalance| — when all three nodes are in
+// deficit, for instance, shuffling power between them changes nothing. Say "ties", not "off by 0.0".
+function offOptimum(rec) {
+  if (rec.action === rec.best) return " — matches the optimum";
+  const gap = rec.scores[rec.action].s - rec.scores[rec.best].s;
+  return gap < 0.05 ? " — ties the optimum" : " — off-optimum by " + gap.toFixed(1) + " MW";
+}
+
+function renderLog() {
+  const rec = S.last;
+  if (!rec) return;
+  const d = document.createElement("div");
+  const acted = rec.moved > 1e-9;
+  d.className = "entry " + (acted ? "act" : "held");
+  const day = Math.floor(rec.t / 24) + 1, hr = rec.t % 24;
+  const before = stress(rec.pre), after = stress(rec.post);
+  const move = rec.kind === "continuous"
+    ? (acted ? "shunt adjust " + rec.acts.map((a, i) => LINE_OF[i] + " " + signed(a * MAX_DELTA, 1)).join(" · ") : "all lines held")
+    : (rec.action === 0 ? "Hold" : ACTION_MAP[rec.action] + " · " + S.mw.toFixed(0) + " MW");
+
+  let html =
+    '<div class="hd"><span class="hr">D' + day + ' ' + String(hr).padStart(2, "0") + ':00</span>' +
+    '<span class="mv" style="color:' + (acted ? "var(--a)" : "var(--muted)") + '">' + move + '</span></div>' +
+    '<ul class="steps">' +
+    '<li><b>observe</b><span>net G−L = ' + rec.pre.map((x) => fmt(x, 1)).join(" / ") + ' MW&nbsp; (Σ|·| = ' + before.toFixed(1) + ')</span></li>' +
+    '<li><b>regime</b><span>' + REGIMES[rec.regime].name.toLowerCase() + ' — load ×' + REGIMES[rec.regime].load.toFixed(2) +
+      ', solar ×' + REGIMES[rec.regime].solar.toFixed(2) + ', wind ×' + REGIMES[rec.regime].wind.toFixed(2) + '</span></li>';
+
+  if (rec.kind === "discrete") {
+    html += '<li><b>evaluate</b><span>7 actions scored; greedy optimum ' + ACTION_MAP[rec.best] +
+      ' at Σ|·| = ' + rec.scores[rec.best].s.toFixed(1) + ' MW</span></li>' +
+      '<li><b>select</b><span>' + ACTION_MAP[rec.action] + offOptimum(rec) + '</span></li>';
+  } else {
+    html += '<li><b>evaluate</b><span>each agent targets clip(own imbalance, 0, 25) on its own line</span></li>' +
+      '<li><b>select</b><span>a = ' + rec.acts.map((a) => signed(a, 2)).join(" / ") + ' → shunts ' +
+      ["AB", "BC", "CA"].map((k) => rec.shunts[k].toFixed(1)).join(" / ") + ' MW</span></li>';
+  }
+
+  html +=
+    '<li><b>settle</b><span>net becomes ' + rec.post.map((x) => fmt(x, 1)).join(" / ") + ' MW&nbsp; (Σ|·| = ' + after.toFixed(1) + ')</span></li>' +
+    '<li><b>reward</b><span class="' + (rec.reward > 0 ? "delta up" : rec.reward < 0 ? "delta down" : "") + '">(' +
+      before.toFixed(1) + ' − ' + after.toFixed(1) + (rec.kind === "continuous" ? ' − penalty' : '') + ') / 10 = ' + signed(rec.reward, 3) + '</span></li>' +
+    '</ul>';
+
+  if (rec.events.length) html += '<div class="ev">▲ ' + rec.events.join(" · ") + '</div>';
+  d.innerHTML = html;
+
+  el.log.prepend(d);
+  while (el.log.children.length > 60) el.log.removeChild(el.log.lastChild);
+}
+
+/* ========================= canvas chart ========================= */
+const WINDOW_H = 48;
+let cvW = 800, cvH = 310, dpr = 1;
+
+function sizeCanvas() {
+  const box = el.cv.parentElement;
+  cvW = Math.max(260, box.clientWidth);
+  cvH = cvW < 520 ? 250 : 310;
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  el.cv.width = Math.round(cvW * dpr);
+  el.cv.height = Math.round(cvH * dpr);
+  el.cv.style.height = cvH + "px";
+  drawChart();
+}
+
+function chartData() {
+  const rows = S.hist.slice(-WINDOW_H);
+  return rows;
+}
+
+function drawChart() {
+  const ctx = el.cv.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cvW, cvH);
+
+  const pad = { l: 44, r: 30, t: 12, b: 26 };
+  const W = cvW - pad.l - pad.r, H = cvH - pad.t - pad.b;
+  const ink = css("--ink"), muted = css("--muted"), grid = css("--grid"), rule = css("--rule"), surf = css("--surface");
+  const cols = [css("--a"), css("--b"), css("--c")];
+
+  ctx.fillStyle = surf;
+  ctx.fillRect(0, 0, cvW, cvH);
+
+  const rows = chartData();
+  // symmetric scale that always includes the real extremes
+  let m = 40;
+  for (const r of rows) for (let i = 0; i < 3; i++) m = Math.max(m, Math.abs(r.pre[i]), Math.abs(r.post[i]));
+  const step = m <= 60 ? 20 : m <= 120 ? 40 : 60;
+  const top = Math.ceil(m / step) * step;
+  const y = (v) => pad.t + H / 2 - (v / top) * (H / 2);
+  const n = Math.max(rows.length, 2);
+  const x = (i) => pad.l + (n === 1 ? W / 2 : (i / (n - 1)) * W);
+
+  // gridlines + y ticks
+  ctx.font = '500 10px "IBM Plex Mono", monospace';
+  ctx.textAlign = "right"; ctx.textBaseline = "middle";
+  for (let v = -top; v <= top + 0.001; v += step) {
+    const yy = y(v);
+    ctx.strokeStyle = Math.abs(v) < 1e-9 ? rule : grid;
+    ctx.lineWidth = Math.abs(v) < 1e-9 ? 1.5 : 1;
+    ctx.beginPath(); ctx.moveTo(pad.l, yy); ctx.lineTo(pad.l + W, yy); ctx.stroke();
+    ctx.fillStyle = muted;
+    ctx.fillText((v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v), pad.l - 8, yy);
+  }
+  ctx.save();
+  ctx.translate(12, pad.t + H / 2); ctx.rotate(-Math.PI / 2);
+  ctx.textAlign = "center"; ctx.fillStyle = muted;
+  ctx.font = '500 10px "IBM Plex Mono", monospace';
+  ctx.fillText("NET MW", 0, 0);
+  ctx.restore();
+
+  if (!rows.length) {
+    ctx.textAlign = "center"; ctx.fillStyle = muted;
+    ctx.font = '400 12px "IBM Plex Sans", sans-serif';
+    ctx.fillText("Run the simulation to plot the grid.", pad.l + W / 2, pad.t + H / 2 + 26);
+    return;
+  }
+
+  // x ticks: hour of day every 6 h
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  ctx.font = '500 10px "IBM Plex Mono", monospace';
+  rows.forEach((r, i) => {
+    if (r.t % 6 !== 0) return;
+    ctx.strokeStyle = grid; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x(i), pad.t); ctx.lineTo(x(i), pad.t + H); ctx.stroke();
+    ctx.fillStyle = muted;
+    ctx.fillText(String(r.t % 24).padStart(2, "0") + "h", x(i), pad.t + H + 7);
+  });
+
+  // unmanaged, dashed and recessive
+  ctx.setLineDash([3, 4]); ctx.lineWidth = 1.5;
+  for (let s = 0; s < 3; s++) {
+    ctx.strokeStyle = cols[s]; ctx.globalAlpha = 0.38;
+    ctx.beginPath();
+    rows.forEach((r, i) => (i ? ctx.lineTo(x(i), y(r.pre[s])) : ctx.moveTo(x(i), y(r.pre[s]))));
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1; ctx.setLineDash([]);
+
+  // managed
+  ctx.lineWidth = 2; ctx.lineJoin = "round";
+  for (let s = 0; s < 3; s++) {
+    ctx.strokeStyle = cols[s];
+    ctx.beginPath();
+    rows.forEach((r, i) => (i ? ctx.lineTo(x(i), y(r.post[s])) : ctx.moveTo(x(i), y(r.post[s]))));
+    ctx.stroke();
+  }
+
+  // emphasised endpoint + direct label, so identity never rests on colour alone
+  const lastI = rows.length - 1, lastR = rows[lastI];
+  for (let s = 0; s < 3; s++) {
+    const yy = y(lastR.post[s]);
+    ctx.fillStyle = cols[s];
+    ctx.strokeStyle = surf; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(x(lastI), yy, 4.5, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = ink;
+    ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.font = '600 11px "IBM Plex Mono", monospace';
+    ctx.fillText(NODES[s].id, x(lastI) + 9, yy);
+  }
+
+  // hover crosshair
+  if (S.hover != null && S.hover >= 0 && S.hover < rows.length) {
+    const i = S.hover, hx = x(i);
+    ctx.strokeStyle = css("--ink-2"); ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
+    ctx.beginPath(); ctx.moveTo(hx, pad.t); ctx.lineTo(hx, pad.t + H); ctx.stroke();
+    ctx.setLineDash([]);
+    for (let s = 0; s < 3; s++) {
+      ctx.fillStyle = cols[s]; ctx.strokeStyle = surf; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(hx, y(rows[i].post[s]), 4, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+    }
+  }
+  S._geom = { x, y, rows, pad, W, H };
+}
+
+function onHover(ev) {
+  const g = S._geom;
+  if (!g || !g.rows.length) return;
+  const rect = el.cv.getBoundingClientRect();
+  const px = ev.clientX - rect.left;
+  const n = g.rows.length;
+  const rel = (px - g.pad.l) / (g.W || 1);
+  let i = Math.round(rel * (n - 1));
+  if (i < 0 || i > n - 1 || px < g.pad.l - 10 || px > g.pad.l + g.W + 10) {
+    if (S.hover !== null) { S.hover = null; el.tip.hidden = true; drawChart(); }
+    return;
+  }
+  S.hover = i;
+  const r = g.rows[i];
+  const day = Math.floor(r.t / 24) + 1, hr = r.t % 24;
+  const move = r.kind === "continuous"
+    ? ["AB", "BC", "CA"].map((k) => k + " " + r.shunts[k].toFixed(1)).join(" · ")
+    : (r.action === 0 ? "Hold" : ACTION_MAP[r.action]);
+  el.tip.innerHTML =
+    '<b>D' + day + ' ' + String(hr).padStart(2, "0") + ':00</b> · ' + REGIMES[r.regime].name.toLowerCase() + '<br>' +
+    NODES.map((nd, s) =>
+      '<span style="color:var(' + nd.v + ')">■</span> ' + nd.id + ' ' + fmt(r.post[s], 1) +
+      ' <span style="opacity:.6">(' + fmt(r.pre[s], 1) + ')</span>').join("<br>") +
+    '<br>' + move + ' · reward ' + signed(r.reward, 2);
+  el.tip.hidden = false;
+  const tx = g.x(i), ty = g.y(Math.max(r.post[0], r.post[1], r.post[2]));
+  el.tip.style.left = Math.max(70, Math.min(cvW - 70, tx)) + "px";
+  el.tip.style.top = Math.max(76, ty - 12) + "px";
+  drawChart();
+}
+
+/* ========================= loop ========================= */
+let phase = 0, lastTs = 0, acc = 0;
+function frame(ts) {
+  if (!lastTs) lastTs = ts;
+  const dt = Math.min((ts - lastTs) / 1000, 0.25);
+  lastTs = ts;
+  phase = (phase + dt * 60) % 1000;
+
+  if (S.running) {
+    acc += dt * S.speed;
+    let did = false;
+    let guard = 0;
+    while (acc >= 1 && guard < 60) { acc -= 1; guard++; if (!stepOnce()) break; did = true; }
+    if (did) renderAll();
+  } else if (S.last) {
+    renderSchematic();     // keeps the flow dashes marching while paused
+  }
+  requestAnimationFrame(frame);
+}
+
+function renderAll() {
+  renderClock(); renderTiles(); renderSchematic(); renderNodeCards();
+  renderMeters(); renderHistogram(); renderDecision(); renderLog(); drawChart();
+}
+
+/* ========================= control ========================= */
+function setRunning(on) {
+  S.running = on;
+  el.play.textContent = on ? "Pause" : "Run";
+  el.play.setAttribute("aria-pressed", String(on));
+  el.chipRun.textContent = on ? "running" : "paused";
+  lastTs = 0; acc = 0;
+}
+
+function reset(regen) {
+  setRunning(false);
+  if (regen || !S.grid) S.grid = generateGrid(DAYS, S.seed);
+  S.rng = makeRng(S.seed * 7919 + 13);
+  S.t = LOOKBACK;
+  S.cumUnmanaged = S.cumManaged = S.cumMoved = S.cumReward = 0;
+  S.active = S.steps = 0;
+  S.counts = new Array(7).fill(0);
+  S.shunts = { AB: 0, BC: 0, CA: 0 };
+  S.hist = []; S.last = null; S.hover = null;
+  el.log.textContent = ""; el.tip.hidden = true;
+  renderAll();
+}
+
+el.play.addEventListener("click", () => setRunning(!S.running));
+el.step.addEventListener("click", () => { setRunning(false); if (stepOnce()) renderAll(); });
+el.reset.addEventListener("click", () => reset(true));
+el.ctl.addEventListener("change", () => { S.ctl = el.ctl.value; reset(false); });
+el.speed.addEventListener("input", () => {
+  S.speed = +el.speed.value;
+  el.spdOut.textContent = S.speed + " h/s";
+});
+el.seed.addEventListener("change", () => {
+  const v = parseInt(el.seed.value, 10);
+  S.seed = Number.isFinite(v) ? Math.max(0, Math.min(99999, v)) : 42;
+  el.seed.value = S.seed;
+  reset(true);
+});
+el.mw.addEventListener("change", () => {
+  const v = parseFloat(el.mw.value);
+  S.mw = Number.isFinite(v) ? Math.max(5, Math.min(40, v)) : 20;
+  el.mw.value = S.mw;
+  reset(false);
+});
+el.cv.addEventListener("pointermove", onHover);
+el.cv.addEventListener("pointerleave", () => { S.hover = null; el.tip.hidden = true; drawChart(); });
+window.addEventListener("resize", sizeCanvas);
+document.addEventListener("keydown", (e) => {
+  if (e.target.matches("input, select, button")) return;
+  if (e.code === "Space") { e.preventDefault(); setRunning(!S.running); }
+  if (e.key === "s" || e.key === "S") { setRunning(false); if (stepOnce()) renderAll(); }
+});
+
+/* ========================= boot ========================= */
+buildSchematic(); buildNodeCards(); buildMeters(); buildHist(); buildBars();
+S.ctl = el.ctl.value; S.speed = +el.speed.value;
+el.spdOut.textContent = S.speed + " h/s";
+reset(true);
+sizeCanvas();
+// Open in a realistic working state: 18 hours of the grid already balanced.
+for (let i = 0; i < 18; i++) stepOnce();
+renderAll();
+requestAnimationFrame(frame);
+</script>
+
+</body>
+</html>

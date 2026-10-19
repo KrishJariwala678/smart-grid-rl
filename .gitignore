@@ -1,0 +1,20 @@
+# Third-party reference papers — copyrighted, not ours to redistribute
+PBL_Deliverables/References/
+
+# Working copies
+PBL_Deliverables/Copy_*/
+
+# Vercel project link + build cache
+.vercel/
+power-grid-rl/.vercel/
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+venv/
+.venv/
